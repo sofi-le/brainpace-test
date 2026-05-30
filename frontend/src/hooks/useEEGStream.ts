@@ -336,7 +336,9 @@ export function formatDuration(sec: number): string {
 }
 
 export function formatPower(v: number): string {
-  return v < 0.001 ? `${(v * 1e6).toFixed(1)}e-6` : v.toFixed(4);
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}k`;
+  return v.toFixed(1);
 }
 
 export function formatCountdown(sec: number): string {

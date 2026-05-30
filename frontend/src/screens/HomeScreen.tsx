@@ -67,7 +67,7 @@ function BandCard({
       <Text style={styles.bandRange}>{range}</Text>
       <View style={styles.bandValueRow}>
         <Text style={styles.bandValue}>{value}</Text>
-        <Text style={styles.bandUnit}> V{'²'}/Hz</Text>
+        <Text style={styles.bandUnit}> au</Text>
       </View>
       <Text style={[styles.bandDelta, { color: accent }]}>
         {rising ? '↑' : '↓'} {pct}% of total
@@ -226,7 +226,7 @@ export default function HomeScreen() {
         </View>
 
         <Text style={styles.formula}>TBR = {'θ'} Power (4{'–8'} Hz) / {'β'} Power (13{'–30'} Hz)</Text>
-        <Text style={styles.formulaSub}>Computed via Welch PSD {'·'} 20-sec buckets {'·'} V{'²'}/Hz</Text>
+        <Text style={styles.formulaSub}>Computed via Welch PSD {'·'} 20-sec buckets {'·'} raw FFT power</Text>
       </View>
 
       {/* Band cards */}
