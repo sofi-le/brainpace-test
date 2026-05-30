@@ -24,19 +24,20 @@ function catmullRom(pts: { x: number; y: number }[]): string {
   return d;
 }
 
-function hhmm(ts?: string): string {
-  if (!ts) return '';
-  const d = new Date(ts);
-  if (isNaN(d.getTime())) return '';
-  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-}
-
-// Pick up to 4 evenly spaced time-axis labels from the history.
+// Pick 4 evenly-spaced relative-time labels (e.g. "-2h", "-30m", "now").
 function axisLabels(history: TBRPoint[]): string[] {
-  if (history.length === 0) return [];
-  if (history.length <= 4) return history.map(p => hhmm(p.ts));
+  if (history.length < 2) return [];
+  const maxTime = history[history.length - 1].time;
   const idxs = [0, 1, 2, 3].map(i => Math.round((i / 3) * (history.length - 1)));
-  return idxs.map(i => hhmm(history[i].ts));
+  return idxs.map(i => {
+    const secAgo = maxTime - history[i].time;
+    if (secAgo < 30) return 'now';
+    const m = Math.round(secAgo / 60);
+    if (m < 60) return `-${m}m`;
+    const h = Math.floor(m / 60);
+    const rem = m % 60;
+    return rem === 0 ? `-${h}h` : `-${h}h${rem}m`;
+  });
 }
 
 // Mini vertical bar chart for band cards — recent TBR points as a sparkline.

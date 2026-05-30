@@ -3,37 +3,18 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from
 import Svg, { Path, Rect, Circle, Line, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { colors, getTBRLevel } from '../theme';
 import { useEEGStream, formatDuration } from '../hooks/useEEGStream';
+import type { TBRPoint } from '../types';
 
 const SW = Dimensions.get('window').width;
 const CHART_W = SW - 56;
+
+const TBR_MAX = 5;
 
 const PAST_SESSIONS = [
   { label: 'Monday Session',    time: '9:30 AM',  dur: '2h',     tbr: 2.8, breaks: 3 },
   { label: 'Friday Session',    time: '2:15 PM',  dur: '1h 40m', tbr: 3.6, breaks: 1 },
   { label: 'Wednesday Session', time: '11:00 AM', dur: '1h 15m', tbr: 2.1, breaks: 2 },
 ];
-
-// Chart curve data (fractions of plot area, y=0 top=Severe, y=1 bottom=Alert)
-const CURVE: { x: number; y: number }[] = [
-  { x: 0.0,  y: 0.92 },
-  { x: 0.08, y: 0.85 },
-  { x: 0.16, y: 0.72 },
-  { x: 0.24, y: 0.55 },
-  { x: 0.32, y: 0.40 },
-  { x: 0.38, y: 0.48 },
-  { x: 0.44, y: 0.60 },
-  { x: 0.50, y: 0.70 },
-  { x: 0.56, y: 0.65 },
-  { x: 0.62, y: 0.50 },
-  { x: 0.68, y: 0.42 },
-  { x: 0.75, y: 0.30 },
-  { x: 0.82, y: 0.22 },
-  { x: 0.88, y: 0.18 },
-  { x: 0.94, y: 0.20 },
-  { x: 1.0,  y: 0.15 },
-];
-
-const BREAK_X = 0.50; // break at ~60m mark
 
 function catmullRom(pts: { x: number; y: number }[]): string {
   if (pts.length < 2) return '';
@@ -59,7 +40,22 @@ const ZONES = [
   { label: 'Alert',   color: colors.good },
 ];
 
-function SessionChart() {
+function sessionTimeLabels(history: TBRPoint[]): string[] {
+  if (history.length < 2) return [];
+  const maxTime = history[history.length - 1].time;
+  const idxs = [0, 1, 2, 3, 4].map(i => Math.round((i / 4) * (history.length - 1)));
+  return idxs.map(i => {
+    const secAgo = maxTime - history[i].time;
+    if (secAgo < 30) return 'now';
+    const m = Math.round(secAgo / 60);
+    if (m < 60) return `-${m}m`;
+    const h = Math.floor(m / 60);
+    const rem = m % 60;
+    return rem === 0 ? `-${h}h` : `-${h}h${rem}m`;
+  });
+}
+
+function SessionChart({ history }: { history: TBRPoint[] }) {
   const padL = 36;
   const padR = 8;
   const padTop = 8;
@@ -67,18 +63,28 @@ function SessionChart() {
   const plotH = 160;
   const zoneH = plotH / 4;
 
-  const px = (fx: number) => padL + fx * plotW;
-  const py = (fy: number) => padTop + fy * plotH;
+  const n = history.length;
+  const fx = (i: number) => (n <= 1 ? 1 : i / (n - 1));
+  const fy = (tbr: number) => Math.max(0, Math.min(1, 1 - tbr / TBR_MAX));
 
-  const linePts = CURVE.map(p => ({ x: px(p.x), y: py(p.y) }));
+  const px = (v: number) => padL + v * plotW;
+  const py = (v: number) => padTop + v * plotH;
+
+  const linePts = history.map((p, i) => ({ x: px(fx(i)), y: py(fy(p.tbr)) }));
   const lineD = catmullRom(linePts);
   const areaD = lineD
     ? `${lineD} L ${px(1)} ${padTop + plotH} L ${px(0)} ${padTop + plotH} Z`
     : '';
   const end = linePts[linePts.length - 1];
-  const breakX = px(BREAK_X);
+  const timeLabels = sessionTimeLabels(history);
 
-  const timeLabels = ['0m', '30m', '60m', '90m', 'now'];
+  if (history.length === 0) {
+    return (
+      <View style={styles.emptyChart}>
+        <Text style={styles.emptyText}>Waiting for EEG data…</Text>
+      </View>
+    );
+  }
 
   return (
     <View>
@@ -90,7 +96,6 @@ function SessionChart() {
           </LinearGradient>
         </Defs>
 
-        {/* Zone bands + dividers */}
         {ZONES.map((z, i) => (
           <React.Fragment key={z.label}>
             <Rect
@@ -106,31 +111,24 @@ function SessionChart() {
           </React.Fragment>
         ))}
 
-        {/* Break marker — green vertical band */}
-        <Rect
-          x={breakX - 8} y={padTop}
-          width={16} height={plotH}
-          fill={colors.good} opacity={0.12}
-        />
-        <Line
-          x1={breakX} y1={padTop}
-          x2={breakX} y2={padTop + plotH}
-          stroke={colors.good} strokeWidth={1} opacity={0.5}
-        />
-
-        {/* Area + line */}
         {areaD ? <Path d={areaD} fill="url(#chartArea)" /> : null}
         {lineD ? (
           <Path d={lineD} stroke={colors.purpL} strokeWidth={2.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
         ) : null}
 
-        {/* End marker */}
-        <Circle cx={end.x} cy={end.y} r={8} fill={colors.purp} opacity={0.2} />
-        <Circle cx={end.x} cy={end.y} r={4.5} fill={colors.purp} />
-        <Circle cx={end.x} cy={end.y} r={2.5} fill={colors.white} />
+        {linePts.map((p, i) => (
+          <Circle key={i} cx={p.x} cy={p.y} r={1.6} fill={colors.purpL} opacity={0.7} />
+        ))}
+
+        {end && (
+          <>
+            <Circle cx={end.x} cy={end.y} r={8} fill={colors.purp} opacity={0.2} />
+            <Circle cx={end.x} cy={end.y} r={4.5} fill={colors.purp} />
+            <Circle cx={end.x} cy={end.y} r={2.5} fill={colors.white} />
+          </>
+        )}
       </Svg>
 
-      {/* Zone labels (absolute positioned over SVG) */}
       {ZONES.map((z, i) => (
         <Text
           key={z.label}
@@ -140,12 +138,8 @@ function SessionChart() {
         </Text>
       ))}
 
-      {/* BREAK label */}
-      <Text style={[styles.breakLabel, { left: breakX - 16, top: padTop - 2 }]}>BREAK</Text>
-
-      {/* Time axis */}
       <View style={[styles.timeAxis, { marginLeft: padL, width: plotW }]}>
-        {timeLabels.map(t => <Text key={t} style={styles.timeTick}>{t}</Text>)}
+        {timeLabels.map((t, i) => <Text key={i} style={styles.timeTick}>{t}</Text>)}
       </View>
     </View>
   );
@@ -155,23 +149,27 @@ export default function StudyScreen() {
   const { tbr, prediction, tbrHistory, sessionSec, breakCount, logBreak } = useEEGStream();
   const retention = prediction?.estimated_retention ?? 68;
 
+  const avgTbr = useMemo(() => {
+    if (tbrHistory.length === 0) return tbr;
+    const sum = tbrHistory.reduce((a, p) => a + p.tbr, 0);
+    return sum / tbrHistory.length;
+  }, [tbrHistory, tbr]);
+
   const stats = [
     { label: 'DURATION', value: formatDuration(sessionSec), color: colors.tp },
-    { label: 'AVG TBR',  value: tbr.toFixed(1), color: colors.teal },
-    { label: 'BREAKS',   value: `${breakCount}/3`, color: colors.tp },
-    { label: 'RETAIN',   value: `${retention}%`, color: colors.good },
+    { label: 'AVG TBR',  value: avgTbr.toFixed(1),         color: colors.teal },
+    { label: 'BREAKS',   value: `${breakCount}/3`,          color: colors.tp },
+    { label: 'RETAIN',   value: `${retention}%`,            color: colors.good },
   ];
 
   return (
     <ScrollView style={styles.root} showsVerticalScrollIndicator={false}>
-      {/* Header */}
       <Text style={styles.title}>Study Session</Text>
       <View style={styles.subRow}>
         <View style={styles.connDot} />
-        <Text style={styles.subtitle}>Organic Chemistry \u00B7 AWear streaming</Text>
+        <Text style={styles.subtitle}>Organic Chemistry · AWear streaming</Text>
       </View>
 
-      {/* Stat pills */}
       <View style={styles.pillRow}>
         {stats.map(s => (
           <View key={s.label} style={styles.statPill}>
@@ -181,7 +179,6 @@ export default function StudyScreen() {
         ))}
       </View>
 
-      {/* Chart card */}
       <View style={styles.chartCard}>
         <View style={styles.chartHeader}>
           <Text style={styles.chartTitle}>Session fatigue (TBR)</Text>
@@ -189,42 +186,9 @@ export default function StudyScreen() {
             <Text style={styles.breakNowText}>BREAK NOW</Text>
           </TouchableOpacity>
         </View>
-        <SessionChart />
+        <SessionChart history={tbrHistory} />
       </View>
 
-      {/* Fatigue Prediction card */}
-      <View style={styles.predCard}>
-        <View style={styles.predHeader}>
-          <View style={styles.predIconWrap}>
-            <Text style={styles.predIcon}>{'\u26A1'}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.predTitle}>Fatigue Prediction</Text>
-            <Text style={styles.predSub}>Based on TBR slope from 42 prior sessions</Text>
-          </View>
-        </View>
-
-        <View style={styles.predStats}>
-          <View style={styles.predStat}>
-            <Text style={styles.predStatLabel}>To severe</Text>
-            <Text style={[styles.predStatValue, { color: colors.warn }]}>~12 min</Text>
-          </View>
-          <View style={styles.predStat}>
-            <Text style={styles.predStatLabel}>Break at</Text>
-            <Text style={[styles.predStatValue, { color: colors.tp }]}>NOW</Text>
-          </View>
-          <View style={styles.predStat}>
-            <Text style={styles.predStatLabel}>Recovery</Text>
-            <Text style={[styles.predStatValue, { color: colors.teal }]}>8-10 min</Text>
-          </View>
-        </View>
-
-        <Text style={styles.predNote}>
-          {'\u2192'} You lose ~40% retention past TBR 3.5
-        </Text>
-      </View>
-
-      {/* Past Sessions */}
       <Text style={styles.sectionTitle}>Past Sessions</Text>
       {PAST_SESSIONS.map(se => {
         const level = getTBRLevel(se.tbr);
@@ -233,7 +197,7 @@ export default function StudyScreen() {
             <View style={[styles.sessionBorder, { backgroundColor: level.color }]} />
             <View style={styles.sessionInfo}>
               <Text style={styles.sessionName}>{se.label}</Text>
-              <Text style={styles.sessionMeta}>{se.time} \u00B7 {se.dur} \u00B7 {se.breaks} break{se.breaks !== 1 ? 's' : ''}</Text>
+              <Text style={styles.sessionMeta}>{se.time} · {se.dur} · {se.breaks} break{se.breaks !== 1 ? 's' : ''}</Text>
             </View>
             <View style={styles.tbrBadge}>
               <Text style={[styles.tbrBadgeValue, { color: level.color }]}>{se.tbr.toFixed(1)}</Text>
@@ -267,22 +231,12 @@ const styles = StyleSheet.create({
   breakNowBtn: { backgroundColor: colors.teal, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
   breakNowText: { fontSize: 10, fontWeight: '700', color: colors.bg, letterSpacing: 0.3 },
 
+  emptyChart: { height: 160, alignItems: 'center', justifyContent: 'center' },
+  emptyText: { fontSize: 12, color: colors.ts },
+
   zoneLabel: { position: 'absolute', left: 4, fontSize: 8, fontWeight: '600' },
-  breakLabel: { position: 'absolute', fontSize: 8, fontWeight: '700', color: colors.good },
   timeAxis: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
   timeTick: { fontSize: 9, color: colors.tl },
-
-  predCard: { backgroundColor: colors.bg2, borderRadius: 16, padding: 16, marginTop: 16 },
-  predHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  predIconWrap: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.purp + '30', alignItems: 'center', justifyContent: 'center' },
-  predIcon: { fontSize: 16 },
-  predTitle: { fontSize: 14, fontWeight: '600', color: colors.tp },
-  predSub: { fontSize: 10, color: colors.tl, marginTop: 2 },
-  predStats: { flexDirection: 'row', marginTop: 16, gap: 8 },
-  predStat: { flex: 1 },
-  predStatLabel: { fontSize: 9, color: colors.ts },
-  predStatValue: { fontSize: 18, fontWeight: '700', marginTop: 4 },
-  predNote: { fontSize: 10, color: colors.tl, marginTop: 14 },
 
   sectionTitle: { fontSize: 16, fontWeight: '600', color: colors.tp, marginTop: 24, marginBottom: 12 },
   sessionRow: { flexDirection: 'row', backgroundColor: colors.bg2, borderRadius: 12, marginBottom: 8, overflow: 'hidden', alignItems: 'center' },
