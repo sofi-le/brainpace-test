@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
 import Svg, { Path, Rect, Circle, Line, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { colors, getTBRLevel } from '../theme';
@@ -131,6 +131,11 @@ function TBRChart({ history, rangeIdx }: { history: TBRPoint[]; rangeIdx: number
 export default function LiveScreen() {
   const stream = useEEGStream();
   const [rangeIdx, setRangeIdx] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => stream.refreshNow(), 5000);
+    return () => clearInterval(t);
+  }, [stream.refreshNow]);
 
   const level = getTBRLevel(stream.tbr);
 
