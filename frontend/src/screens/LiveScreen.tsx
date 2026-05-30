@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from
 import Svg, { Path, Rect, Circle, Line, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { colors, getTBRLevel } from '../theme';
 import { useEEGStream, formatCountdown } from '../hooks/useEEGStream';
+import { fetchCognitionSeries, resolveParticipantId, type BackendBandPowers } from '../api';
 import type { TBRPoint } from '../types';
 
 const SW = Dimensions.get('window').width;
@@ -133,25 +134,40 @@ function TBRChart({ history, rangeIdx }: { history: TBRPoint[]; rangeIdx: number
 export default function LiveScreen() {
   const stream = useEEGStream();
   const [rangeIdx, setRangeIdx] = useState(0);
+  const [liveBands, setLiveBands] = useState<BackendBandPowers | null>(null);
 
   useEffect(() => {
-    const t = setInterval(() => stream.refreshNow(), 5000);
-    return () => clearInterval(t);
-  }, [stream.refreshNow]);
+    let cancelled = false;
+    async function fetchBands() {
+      try {
+        const pid = await resolveParticipantId();
+        if (!pid || cancelled) return;
+        const series = await fetchCognitionSeries(pid, 5, '20s');
+        const pts = series.points;
+        if (pts.length > 0 && !cancelled) {
+          setLiveBands(pts[pts.length - 1].band_powers);
+        }
+      } catch {}
+    }
+    fetchBands();
+    const t = setInterval(fetchBands, 5000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
 
   const level = getTBRLevel(stream.tbr);
 
+  const b = liveBands ?? stream.bands;
   const bandBars = useMemo(() => {
     const bands = [
-      { label: 'Delta (1–4 Hz)',   color: colors.tl,    v: stream.bands.delta },
-      { label: 'Theta (4–8 Hz)',   color: colors.warn,   v: stream.bands.theta },
-      { label: 'Alpha (8–13 Hz)',  color: colors.purpL,  v: stream.bands.alpha },
-      { label: 'Beta (13–30 Hz)', color: colors.teal,   v: stream.bands.beta  },
-      { label: 'Gamma (30–50 Hz)',color: colors.warnL,  v: stream.bands.gamma },
+      { label: 'Delta (1–4 Hz)',   color: colors.tl,    v: b.delta },
+      { label: 'Theta (4–8 Hz)',   color: colors.warn,   v: b.theta },
+      { label: 'Alpha (8–13 Hz)',  color: colors.purpL,  v: b.alpha },
+      { label: 'Beta (13–30 Hz)', color: colors.teal,   v: b.beta  },
+      { label: 'Gamma (30–50 Hz)',color: colors.warnL,  v: b.gamma },
     ];
-    const maxV = Math.max(...bands.map(b => b.v), 1e-12);
-    return bands.map(b => ({ ...b, pct: b.v / maxV }));
-  }, [stream.bands]);
+    const maxV = Math.max(...bands.map(bd => bd.v), 1e-12);
+    return bands.map(bd => ({ ...bd, pct: bd.v / maxV }));
+  }, [b]);
 
   const tbrDelta = useMemo(() => {
     const h = stream.tbrHistory;
@@ -207,15 +223,15 @@ export default function LiveScreen() {
             <Text style={styles.avgLabel}>Latest window avg</Text>
             <View style={styles.powerRow}>
               <Text style={styles.powerBand}>θ Power</Text>
-              <Text style={[styles.powerVal, { color: colors.warn }]}>{fmtPower(stream.bands.theta)}</Text>
+              <Text style={[styles.powerVal, { color: colors.warn }]}>{fmtPower(b.theta)}</Text>
             </View>
             <View style={styles.powerRow}>
               <Text style={styles.powerBand}>β Power</Text>
-              <Text style={[styles.powerVal, { color: colors.teal }]}>{fmtPower(stream.bands.beta)}</Text>
+              <Text style={[styles.powerVal, { color: colors.teal }]}>{fmtPower(b.beta)}</Text>
             </View>
             <View style={styles.powerRow}>
               <Text style={styles.powerBand}>α Power</Text>
-              <Text style={[styles.powerVal, { color: colors.purpL }]}>{fmtPower(stream.bands.alpha)}</Text>
+              <Text style={[styles.powerVal, { color: colors.purpL }]}>{fmtPower(b.alpha)}</Text>
             </View>
           </View>
         </View>
