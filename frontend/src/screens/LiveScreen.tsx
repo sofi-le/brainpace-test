@@ -8,8 +8,8 @@ import type { TBRPoint } from '../types';
 const SW = Dimensions.get('window').width;
 const CHART_W = SW - 32;
 
-const TIME_RANGES = ['30m', '1h', '3h', '12h'];
-const RANGE_SECONDS = [30 * 60, 3600, 3 * 3600, 12 * 3600];
+const TIME_RANGES = ['5m', '10m', '30m', '1h'];
+const RANGE_SECONDS = [5 * 60, 10 * 60, 30 * 60, 3600];
 
 function catmullRom(pts: { x: number; y: number }[]): string {
   if (pts.length < 2) return '';
