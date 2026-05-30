@@ -1,42 +1,15 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
 import Svg, { Path, Rect, Circle, Line, Defs, LinearGradient, Stop } from 'react-native-svg';
-import { colors, getTBRLevel, FATIGUE_LEVELS } from '../theme';
+import { colors, getTBRLevel } from '../theme';
+import { useEEGStream, formatCountdown } from '../hooks/useEEGStream';
+import type { TBRPoint } from '../types';
 
 const SW = Dimensions.get('window').width;
 const CHART_W = SW - 32;
 
-// Placeholder data — reflects a 5-min polled snapshot
-const SNAPSHOT = {
-  tbr: 3.2,
-  tbrDelta: 0.4,
-  tbrVsBaseline: 1.4,
-  thetaPower: 14.6e-6,
-  betaPower: 4.6e-6,
-  alphaPower: 8.4e-6,
-  lastPullMin: 2,
-  nextPullSec: 180, // 3:00
-};
-
-const BAND_BARS = [
-  { label: 'Delta (1–4 Hz)',   color: colors.tl,    pct: 0.14 },
-  { label: 'Theta (4–8 Hz)',   color: colors.warn,   pct: 0.92 },
-  { label: 'Alpha (8–13 Hz)',  color: colors.purpL,  pct: 0.55 },
-  { label: 'Beta (13–30 Hz)', color: colors.teal,   pct: 0.30 },
-  { label: 'Gamma (30–50 Hz)',color: colors.warnL,  pct: 0.08 },
-];
-
-// TBR history points (x=fraction of window, y=TBR value)
-const TBR_HISTORY = [
-  { t: 0.00, v: 1.8 }, { t: 0.08, v: 1.9 }, { t: 0.16, v: 2.1 },
-  { t: 0.24, v: 2.4 }, { t: 0.32, v: 2.2 }, { t: 0.38, v: 2.6 },
-  { t: 0.44, v: 2.3 }, { t: 0.50, v: 2.8 }, { t: 0.56, v: 2.5 },
-  { t: 0.62, v: 2.9 }, { t: 0.68, v: 3.0 }, { t: 0.75, v: 2.8 },
-  { t: 0.82, v: 3.1 }, { t: 0.88, v: 3.0 }, { t: 0.94, v: 3.1 },
-  { t: 1.00, v: 3.2 },
-];
-
 const TIME_RANGES = ['2h', '6h', '12h', '24h'];
+const RANGE_SECONDS = [2 * 3600, 6 * 3600, 12 * 3600, 24 * 3600];
 
 function catmullRom(pts: { x: number; y: number }[]): string {
   if (pts.length < 2) return '';
@@ -55,17 +28,11 @@ function catmullRom(pts: { x: number; y: number }[]): string {
   return d;
 }
 
-function formatSec(s: number) {
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m}:${sec.toString().padStart(2, '0')}`;
-}
-
-function formatPower(v: number) {
+function fmtPower(v: number) {
   return `${(v * 1e6).toFixed(1)}e-6 V²/Hz`;
 }
 
-function TBRChart({ rangeIdx }: { rangeIdx: number }) {
+function TBRChart({ history, rangeIdx }: { history: TBRPoint[]; rangeIdx: number }) {
   const padL = 8;
   const padR = 8;
   const padTop = 20;
@@ -81,16 +48,33 @@ function TBRChart({ rangeIdx }: { rangeIdx: number }) {
     { label: 'Severe',   color: colors.severe, min: 4.0, max: 4.5 },
   ];
 
+  const filtered = useMemo(() => {
+    if (history.length === 0) return [];
+    const cutoff = RANGE_SECONDS[rangeIdx];
+    const maxTime = history[history.length - 1].time;
+    return history.filter(p => maxTime - p.time <= cutoff);
+  }, [history, rangeIdx]);
+
+  const pts = useMemo(() => {
+    if (filtered.length === 0) return [];
+    const t0 = filtered[0].time;
+    const span = filtered[filtered.length - 1].time - t0;
+    return filtered.map(p => ({
+      t: span > 0 ? (p.time - t0) / span : 0,
+      v: p.tbr,
+    }));
+  }, [filtered]);
+
   const py = (v: number) => padTop + plotH - ((v - tbrMin) / (tbrMax - tbrMin)) * plotH;
   const px = (t: number) => padL + t * plotW;
 
-  const linePts = TBR_HISTORY.map(p => ({ x: px(p.t), y: py(p.v) }));
+  const linePts = pts.map(p => ({ x: px(p.t), y: py(p.v) }));
   const lineD = catmullRom(linePts);
   const areaD = lineD
     ? `${lineD} L ${px(1)} ${padTop + plotH} L ${px(0)} ${padTop + plotH} Z`
     : '';
 
-  const timeLabels = ['-2h', '-1h30', '-1h', '-30m', 'Now'];
+  const timeLabels = [`-${TIME_RANGES[rangeIdx]}`, '', '', '', 'Now'];
 
   return (
     <View>
@@ -116,16 +100,18 @@ function TBRChart({ rangeIdx }: { rangeIdx: number }) {
         {areaD ? <Path d={areaD} fill="url(#tbrArea)" /> : null}
         {lineD ? <Path d={lineD} stroke={colors.purpL} strokeWidth={2} fill="none" strokeLinecap="round" /> : null}
 
-        {TBR_HISTORY.map((p, i) => (
+        {pts.map((p, i) => (
           <Circle key={i} cx={px(p.t)} cy={py(p.v)} r={3} fill={colors.purp} />
         ))}
 
-        {/* Now marker */}
-        <Circle cx={px(1)} cy={py(TBR_HISTORY[TBR_HISTORY.length - 1].v)} r={6} fill={colors.purp} opacity={0.25} />
-        <Circle cx={px(1)} cy={py(TBR_HISTORY[TBR_HISTORY.length - 1].v)} r={3.5} fill={colors.purp} />
+        {pts.length > 0 && (
+          <>
+            <Circle cx={px(1)} cy={py(pts[pts.length - 1].v)} r={6} fill={colors.purp} opacity={0.25} />
+            <Circle cx={px(1)} cy={py(pts[pts.length - 1].v)} r={3.5} fill={colors.purp} />
+          </>
+        )}
       </Svg>
 
-      {/* Zone labels */}
       {zones.map(z => (
         <Text
           key={z.label}
@@ -135,49 +121,75 @@ function TBRChart({ rangeIdx }: { rangeIdx: number }) {
         </Text>
       ))}
 
-      {/* Time axis */}
       <View style={[styles.timeAxis, { marginLeft: padL, width: plotW }]}>
-        {timeLabels.map(t => <Text key={t} style={styles.timeTick}>{t}</Text>)}
+        {timeLabels.map((t, i) => <Text key={i} style={styles.timeTick}>{t}</Text>)}
       </View>
     </View>
   );
 }
 
 export default function LiveScreen() {
-  const [countdown, setCountdown] = useState(SNAPSHOT.nextPullSec);
+  const stream = useEEGStream();
   const [rangeIdx, setRangeIdx] = useState(0);
 
-  useEffect(() => {
-    const t = setInterval(() => setCountdown(c => (c > 0 ? c - 1 : 300)), 1000);
-    return () => clearInterval(t);
-  }, []);
+  const level = getTBRLevel(stream.tbr);
 
-  const level = getTBRLevel(SNAPSHOT.tbr);
+  const bandBars = useMemo(() => {
+    const bands = [
+      { label: 'Delta (1–4 Hz)',   color: colors.tl,    v: stream.bands.delta },
+      { label: 'Theta (4–8 Hz)',   color: colors.warn,   v: stream.bands.theta },
+      { label: 'Alpha (8–13 Hz)',  color: colors.purpL,  v: stream.bands.alpha },
+      { label: 'Beta (13–30 Hz)', color: colors.teal,   v: stream.bands.beta  },
+      { label: 'Gamma (30–50 Hz)',color: colors.warnL,  v: stream.bands.gamma },
+    ];
+    const maxV = Math.max(...bands.map(b => b.v), 1e-12);
+    return bands.map(b => ({ ...b, pct: b.v / maxV }));
+  }, [stream.bands]);
+
+  const tbrDelta = useMemo(() => {
+    const h = stream.tbrHistory;
+    if (h.length < 2) return null;
+    return h[h.length - 1].tbr - h[h.length - 2].tbr;
+  }, [stream.tbrHistory]);
+
+  const tbrVsBaseline = stream.prediction?.tbr_vs_baseline ?? null;
+  const trend = stream.prediction?.trend ?? 'stable';
+
+  const lastPullLabel = stream.lastPullAgo < 60
+    ? `${stream.lastPullAgo}s ago`
+    : `${Math.floor(stream.lastPullAgo / 60)}m ago`;
 
   return (
     <ScrollView style={styles.root} showsVerticalScrollIndicator={false}>
-      {/* Header */}
       <Text style={styles.title}>Latest Reading</Text>
-      <Text style={styles.subtitle}>AWear EEG · Polled every 5 min</Text>
+      <Text style={styles.subtitle}>AWear EEG · Polled every 20 s</Text>
 
-      {/* Poll status bar */}
+      {stream.error && (
+        <View style={styles.errorBar}>
+          <Text style={styles.errorText}>{stream.error}</Text>
+        </View>
+      )}
+
       <View style={styles.statusBar}>
         <View style={styles.statusLeft}>
-          <View style={styles.greenDot} />
-          <Text style={styles.statusText}>Last pull: {SNAPSHOT.lastPullMin} min ago</Text>
+          <View style={[styles.dot, { backgroundColor: stream.isConnected ? colors.good : colors.warn }]} />
+          <Text style={[styles.statusText, { color: stream.isConnected ? colors.good : colors.warn }]}>
+            {stream.isConnected ? `Last pull: ${lastPullLabel}` : 'Connecting…'}
+          </Text>
         </View>
-        <Text style={styles.nextText}>Next in {formatSec(countdown)}</Text>
+        <Text style={styles.nextText}>Next in {formatCountdown(stream.nextPullIn)}</Text>
       </View>
 
-      {/* Snapshot card */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>5-Minute Snapshot</Text>
-        <Text style={styles.cardSub}>300 epochs · Welch PSD · n_fft=256</Text>
+        <Text style={styles.cardTitle}>Latest Snapshot</Text>
+        <Text style={styles.cardSub}>{stream.epochsInWindow} pts · Welch PSD · n_fft=256</Text>
 
         <View style={styles.snapshotRow}>
           <View style={styles.snapshotLeft}>
             <Text style={styles.tbrLabel}>TBR</Text>
-            <Text style={[styles.tbrValue, { color: level.color }]}>{SNAPSHOT.tbr.toFixed(1)}</Text>
+            <Text style={[styles.tbrValue, { color: level.color }]}>
+              {stream.tbr > 0 ? stream.tbr.toFixed(1) : '—'}
+            </Text>
             <View style={[styles.fatigueBadge, { backgroundColor: level.color + '22', borderColor: level.color + '55' }]}>
               <Text style={[styles.fatigueBadgeText, { color: level.color }]}>
                 {level.label.toUpperCase()}
@@ -185,34 +197,37 @@ export default function LiveScreen() {
             </View>
           </View>
           <View style={styles.snapshotRight}>
-            <Text style={styles.avgLabel}>Avg over window</Text>
+            <Text style={styles.avgLabel}>Latest window avg</Text>
             <View style={styles.powerRow}>
               <Text style={styles.powerBand}>θ Power</Text>
-              <Text style={[styles.powerVal, { color: colors.warn }]}>{formatPower(SNAPSHOT.thetaPower)}</Text>
+              <Text style={[styles.powerVal, { color: colors.warn }]}>{fmtPower(stream.bands.theta)}</Text>
             </View>
             <View style={styles.powerRow}>
               <Text style={styles.powerBand}>β Power</Text>
-              <Text style={[styles.powerVal, { color: colors.teal }]}>{formatPower(SNAPSHOT.betaPower)}</Text>
+              <Text style={[styles.powerVal, { color: colors.teal }]}>{fmtPower(stream.bands.beta)}</Text>
             </View>
             <View style={styles.powerRow}>
               <Text style={styles.powerBand}>α Power</Text>
-              <Text style={[styles.powerVal, { color: colors.purpL }]}>{formatPower(SNAPSHOT.alphaPower)}</Text>
+              <Text style={[styles.powerVal, { color: colors.purpL }]}>{fmtPower(stream.bands.alpha)}</Text>
             </View>
           </View>
         </View>
 
-        <Text style={styles.deltaLine}>
-          ↑ {SNAPSHOT.tbrDelta.toFixed(1)} from last pull · Rising
-        </Text>
-        <Text style={styles.baselineLine}>
-          ↑ {SNAPSHOT.tbrVsBaseline.toFixed(1)} above baseline (first 30 epochs)
-        </Text>
+        {tbrDelta !== null && (
+          <Text style={styles.deltaLine}>
+            {tbrDelta >= 0 ? '↑' : '↓'} {Math.abs(tbrDelta).toFixed(2)} from last pull · {trend}
+          </Text>
+        )}
+        {tbrVsBaseline !== null && (
+          <Text style={styles.baselineLine}>
+            {tbrVsBaseline >= 0 ? '↑' : '↓'} {Math.abs(tbrVsBaseline).toFixed(1)} vs baseline (first 3 pts)
+          </Text>
+        )}
       </View>
 
-      {/* Band power bars */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Band Powers · 300-epoch avg</Text>
-        {BAND_BARS.map(b => (
+        <Text style={styles.cardTitle}>Band Powers · latest window</Text>
+        {bandBars.map(b => (
           <View key={b.label} style={styles.barRow}>
             <Text style={styles.barLabel}>{b.label}</Text>
             <View style={styles.barTrack}>
@@ -222,10 +237,9 @@ export default function LiveScreen() {
         ))}
       </View>
 
-      {/* TBR history chart */}
       <View style={styles.card}>
         <View style={styles.chartHeader}>
-          <Text style={styles.cardTitle}>TBR History · 5-min intervals</Text>
+          <Text style={styles.cardTitle}>TBR History · 20s buckets</Text>
           <View style={styles.rangePills}>
             {TIME_RANGES.map((r, i) => (
               <TouchableOpacity
@@ -239,16 +253,15 @@ export default function LiveScreen() {
             ))}
           </View>
         </View>
-        <TBRChart rangeIdx={rangeIdx} />
+        <TBRChart history={stream.tbrHistory} rangeIdx={rangeIdx} />
       </View>
 
-      {/* How it works */}
       <View style={styles.howCard}>
         <View style={styles.howDot} />
         <View style={{ flex: 1 }}>
           <Text style={styles.howTitle}>How it works</Text>
           <Text style={styles.howBody}>
-            AWear API polled every 5 min → 300 1-sec epochs → bandpass_fft per band → Welch PSD → TBR computed
+            AWear API polled every 20 s → 20s buckets → bandpass_fft per band → Welch PSD → TBR computed
           </Text>
         </View>
       </View>
@@ -264,14 +277,19 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: '700', color: colors.tp },
   subtitle: { fontSize: 12, color: colors.tl, marginTop: 4 },
 
+  errorBar: {
+    backgroundColor: colors.severe + '22', borderRadius: 10, padding: 10, marginTop: 12,
+  },
+  errorText: { fontSize: 12, color: colors.severe },
+
   statusBar: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     backgroundColor: colors.bg2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
     marginTop: 16,
   },
   statusLeft: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  greenDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.good },
-  statusText: { fontSize: 13, color: colors.good, fontWeight: '500' },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { fontSize: 13, fontWeight: '500' },
   nextText: { fontSize: 13, color: colors.ts },
 
   card: { backgroundColor: colors.bg2, borderRadius: 16, padding: 16, marginTop: 14 },
