@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "brainpace-web",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd frontend && EXPO_PUBLIC_API_URL=http://localhost:8011 npx expo start --web --port 8090"
+      ],
+      "port": 8090
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "env":{
+    "CLAUDE_ENV_FILE": "/home/yair/Projects/brainpace/backend/.venv/bin/activate"
+  }
+}
