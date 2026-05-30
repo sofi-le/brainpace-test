@@ -60,7 +60,7 @@ export interface SummaryResponse {
   records: number;
   band_powers: BackendBandPowers;
   mood: { valence: number; arousal: number; label: string };
-  tiredness: { score: number; index: number; label: string };
+  tiredness: { ftr: number; baseline: number; deviation_pct: number; label: string };
   cognition: Record<string, number>;
 }
 

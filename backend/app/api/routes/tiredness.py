@@ -8,7 +8,7 @@ from app.analysis.tiredness import estimate_tiredness
 from app.api.deps import get_awear_client
 from app.clients.awear import AwearClient
 from app.models.schemas import BandPowers, TirednessResponse
-from app.services.eeg import participant_band_powers
+from app.services.eeg import participant_band_powers, participant_baseline_ratio
 
 router = APIRouter(prefix="/tiredness", tags=["tiredness"])
 
@@ -21,12 +21,14 @@ async def participant_tiredness(
     client: AwearClient = Depends(get_awear_client),
 ) -> TirednessResponse:
     powers, n = await participant_band_powers(client, participant_id, date, tz)
-    result = estimate_tiredness(powers)
+    baseline, _ = await participant_baseline_ratio(client, participant_id, date, tz)
+    result = estimate_tiredness(powers, baseline)
     return TirednessResponse(
         participant_id=participant_id,
         records=n,
         band_powers=BandPowers(**powers),
-        score=result.score,
-        index=result.index,
+        ftr=result.ftr,
+        baseline=result.baseline,
+        deviation_pct=result.deviation_pct,
         label=result.label,
     )

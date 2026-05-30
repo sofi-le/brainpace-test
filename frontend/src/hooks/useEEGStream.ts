@@ -286,7 +286,7 @@ export function useEEGStream(): EEGStream {
       applyEpoch(latest, history, pred, series.records);
 
       if (summary) {
-        setTirednessScore(summary.tiredness.score);
+        setTirednessScore(summary.tiredness.deviation_pct);
         setTirednessLabel(summary.tiredness.label);
       }
       setIsConnected(true);

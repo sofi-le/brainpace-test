@@ -20,7 +20,7 @@ from app.models.schemas import (
     SummaryResponse,
     TirednessSummary,
 )
-from app.services.eeg import participant_band_powers
+from app.services.eeg import participant_band_powers, participant_baseline_ratio
 
 router = APIRouter(prefix="/summary", tags=["summary"])
 
@@ -34,15 +34,19 @@ async def participant_summary(
 ) -> SummaryResponse:
     """Return the current value of every metric for the given day."""
     powers, n = await participant_band_powers(client, participant_id, date, tz)
+    baseline, _ = await participant_baseline_ratio(client, participant_id, date, tz)
     mood = estimate_mood(powers)
-    tired = estimate_tiredness(powers)
+    tired = estimate_tiredness(powers, baseline)
     return SummaryResponse(
         participant_id=participant_id,
         records=n,
         band_powers=BandPowers(**powers),
         mood=MoodSummary(valence=mood.valence, arousal=mood.arousal, label=mood.label),
         tiredness=TirednessSummary(
-            score=tired.score, index=tired.index, label=tired.label
+            ftr=tired.ftr,
+            baseline=tired.baseline,
+            deviation_pct=tired.deviation_pct,
+            label=tired.label,
         ),
         cognition=cognition_ratios(powers),
     )

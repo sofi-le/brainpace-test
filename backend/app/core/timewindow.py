@@ -45,6 +45,36 @@ def recent_window(
     return start_utc, end_utc
 
 
+def _hms(clock: str) -> tuple[int, int, int]:
+    """Parse an 'HH:MM:SS' clock string into (hour, minute, second)."""
+    hour, minute, second = (int(part) for part in clock.split(":"))
+    return hour, minute, second
+
+
+def clock_window(
+    start_clock: str, end_clock: str, date_str: str | None, tz_name: str
+) -> tuple[str, str]:
+    """Return (start_iso, end_iso) for a fixed clock-time window on one day.
+
+    `start_clock`/`end_clock` are 'HH:MM:SS' wall-clock times in `tz_name` on
+    `date_str` (default: today). Used to pin a fixed calibration/baseline slice
+    of signal (e.g. the tiredness FTR baseline). Timestamps are returned as UTC
+    ISO 8601, matching `day_window`/`recent_window`.
+    """
+    tz = ZoneInfo(tz_name)
+    if date_str:
+        day = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=tz)
+    else:
+        day = datetime.now(tz)
+    sh, sm, ss = _hms(start_clock)
+    eh, em, es = _hms(end_clock)
+    start = day.replace(hour=sh, minute=sm, second=ss, microsecond=0)
+    end = day.replace(hour=eh, minute=em, second=es, microsecond=0)
+    start_utc = start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_utc = end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return start_utc, end_utc
+
+
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600}
 
 

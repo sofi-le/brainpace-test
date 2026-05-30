@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     # so a "last 5 minutes" request hits data that has actually arrived.
     data_delay_seconds: int = 300
 
+    # Tiredness FTR baseline: a fixed "calm" clock-time window (local to the
+    # request tz) whose mean (theta+alpha)/beta ratio is the 0% reference the
+    # FTR brackets are measured against. Demo placeholder — see
+    # app/analysis/tiredness.py.
+    baseline_start_time: str = "15:06:06"
+    baseline_end_time: str = "15:08:05"
+
     # App
     app_name: str = "brainpace"
     artifacts_dir: str = "artifacts"

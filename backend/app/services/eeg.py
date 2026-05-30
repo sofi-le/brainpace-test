@@ -10,10 +10,11 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+from app.analysis.tiredness import fatigue_ratio
 from app.clients.awear import AwearClient
 from app.core.cache import cache_get, cache_set
 from app.core.config import get_settings
-from app.core.timewindow import day_window, recent_window
+from app.core.timewindow import clock_window, day_window, recent_window
 from app.signal.bands import aggregate_band_powers, band_powers, split_bands
 
 
@@ -51,6 +52,50 @@ async def participant_band_powers(
     if ttl > 0:
         cache_set(key, {"powers": powers, "n": n}, ttl)
     return powers, n
+
+
+async def participant_baseline_ratio(
+    client: AwearClient,
+    participant_id: str,
+    date: str | None,
+    tz: str,
+) -> tuple[float, int]:
+    """Mean fatigue ratio (FTR) over the configured calm baseline window.
+
+    The baseline is a fixed clock-time slice (settings.baseline_start_time ..
+    baseline_end_time) on `date` (default today), in `tz` — a "period of
+    calmness" whose mean (theta+alpha)/beta ratio is the 0% reference for the
+    tiredness FTR brackets. Returns (baseline_ratio, n_records).
+
+    Cached under `baseline:{pid}:{date}:{tz}`; on a miss the window is pulled
+    from AWEAR. A baseline with no records yields a 0.0 ratio (callers treat a
+    non-positive baseline as "unavailable").
+    """
+    settings = get_settings()
+    ttl = settings.cache_ttl_seconds
+    key = f"baseline:{participant_id}:{date or 'today'}:{tz}"
+    if ttl > 0:
+        hit = cache_get(key)
+        if hit is not None:
+            return hit["ratio"], hit["n"]
+
+    start, end = clock_window(
+        settings.baseline_start_time, settings.baseline_end_time, date, tz
+    )
+    records = await client.fetch_records(participant_id, start, end, tz)
+
+    waveforms: list[np.ndarray] = []
+    for rec in records:
+        wf = np.asarray(rec.get("waveform", []), dtype=float)
+        if wf.size:
+            waveforms.append(wf)
+
+    powers = aggregate_band_powers(waveforms, settings.sample_rate_hz)
+    ratio = fatigue_ratio(powers)
+    n = len(waveforms)
+    if ttl > 0:
+        cache_set(key, {"ratio": ratio, "n": n}, ttl)
+    return ratio, n
 
 
 def _to_epoch(ts: str) -> float | None:
@@ -110,30 +155,16 @@ async def participant_power_timeline(
     through `bucket_means` to downsample for display. The window is shifted back
     by `data_delay_seconds` so it lands on data that has actually arrived.
     """
-    settings = get_settings()
-    delay = settings.data_delay_seconds
-    fs = settings.sample_rate_hz
-    ttl = settings.cache_ttl_seconds
-
-    # Cache by the minutes/tz window so frequent polls (e.g. every 20s for the
-    # TBR-over-time chart) don't re-pull a full window from AWEAR each tick.
-    key = f"timeline:{participant_id}:{minutes}:{tz}"
-    if ttl > 0:
-        hit = cache_get(key)
-        if hit is not None:
-            return [(ts, powers) for ts, powers in hit["timeline"]]
-
+    delay = get_settings().data_delay_seconds
     start, end = recent_window(minutes, tz, delay)
     records = await client.fetch_records(participant_id, start, end, tz)
 
+    fs = get_settings().sample_rate_hz
     timeline: list[tuple[str, dict[str, float]]] = []
     for rec in records:
         wf = np.asarray(rec.get("waveform", []), dtype=float)
         if wf.size:
             timeline.append((str(rec.get("timestamp", "")), band_powers(wf, fs)))
-
-    if ttl > 0:
-        cache_set(key, {"timeline": timeline}, ttl)
     return timeline
 
 

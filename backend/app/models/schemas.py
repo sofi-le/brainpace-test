@@ -17,9 +17,16 @@ class TirednessResponse(BaseModel):
     participant_id: str
     records: int = Field(..., description="Number of EEG records analyzed")
     band_powers: BandPowers
-    score: float = Field(..., description="0..1, higher = more tired")
-    index: float = Field(..., description="Raw (theta+alpha)/beta ratio")
-    label: str
+    ftr: float = Field(..., description="Current (theta+alpha)/beta fatigue ratio")
+    baseline: float = Field(
+        ..., description="Mean FTR over the calm baseline window (0% reference)"
+    )
+    deviation_pct: float = Field(
+        ..., description="FTR deviation from baseline, percent"
+    )
+    label: str = Field(
+        ..., description='"Normal" | "Mild fatigue" | "Fatigued" | "Burnout"'
+    )
 
 
 class MoodResponse(BaseModel):
@@ -85,8 +92,9 @@ class MoodSummary(BaseModel):
 
 
 class TirednessSummary(BaseModel):
-    score: float
-    index: float
+    ftr: float
+    baseline: float
+    deviation_pct: float
     label: str
 
 
